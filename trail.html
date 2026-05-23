@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="轨迹记录">
+<title>轨迹记录</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --pink: #ff6b9d;
+    --purple: #c44dff;
+    --blue: #4dc9f6;
+    --mint: #45d9a6;
+    --orange: #ffa64d;
+    --bg: #faf8f5;
+    --card: #ffffff;
+    --text: #3d3055;
+    --text2: #a098b0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, 'SF Pro Rounded', 'PingFang SC', sans-serif; background: var(--bg); user-select: none; -webkit-user-select: none; }
+  body.dark { --bg: #1a1a2e; --card: #252540; --text: #f0e8ff; --text2: #8880a0; }
+
+  #app { width: 100%; height: 100%; display: flex; flex-direction: column; }
+
+  /* 顶部 */
+  #header {
+    padding: max(12px, env(safe-area-inset-top)) 20px 8px 20px;
+    text-align: center; flex-shrink: 0;
+  }
+  #header .emoji { font-size: 36px; transition: transform 0.3s; display: inline-block; }
+  #header .emoji.bounce { animation: bounce 0.4s ease; }
+  @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+  #header .title { font-size: 18px; font-weight: 700; color: var(--text); margin: 2px 0; }
+  #header .subtitle { font-size: 11px; color: var(--text2); }
+
+  /* 状态大卡片 */
+  #statusCard {
+    margin: 0 20px; background: var(--card); border-radius: 24px; padding: 20px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.04); flex-shrink: 0;
+  }
+  #statusCard.idle { text-align: center; padding: 28px 20px; }
+  #statusCard.idle .big-text { font-size: 48px; line-height: 1; }
+  #statusCard.idle .hint { font-size: 13px; color: var(--text2); margin-top: 6px; }
+
+  #statusCard.active .stat-row {
+    display: flex; justify-content: space-around; text-align: center; margin-bottom: 12px;
+  }
+  #statusCard.active .stat-num { font-size: 30px; font-weight: 700; color: var(--text); letter-spacing: -1px; }
+  #statusCard.active .stat-label { font-size: 10px; color: var(--text2); letter-spacing: 1px; }
+  #statusCard.active .pace-row {
+    display: flex; justify-content: center; gap: 20px;
+    padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.06);
+  }
+  #statusCard.active .pace-item { text-align: center; }
+  #statusCard.active .pace-val { font-size: 16px; font-weight: 600; color: var(--pink); }
+  #statusCard.active .pace-lbl { font-size: 9px; color: var(--text2); }
+
+  /* 地图区 */
+  #mapWrap {
+    flex: 1; margin: 12px 20px; border-radius: 20px; overflow: hidden;
+    background: #e8e4df; box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    position: relative; min-height: 0;
+  }
+  #mapWrap.mini { flex: 0 0 140px; }
+  #map { width: 100%; height: 100%; }
+  .leaflet-control-zoom, .leaflet-control-attribution { display: none; }
+  #mapHint {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    pointer-events: none; z-index: 10; color: var(--text2); font-size: 13px;
+  }
+
+  /* 底部控制 */
+  #controls {
+    padding: 8px 20px max(18px, env(safe-area-inset-bottom)) 20px;
+    display: flex; align-items: center; justify-content: center; gap: 20px; flex-shrink: 0;
+  }
+  #controls button {
+    border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: all 0.2s;
+  }
+  #btnMain {
+    width: 72px; height: 72px; border-radius: 50%;
+    font-size: 30px; color: #fff;
+    background: linear-gradient(135deg, var(--pink), var(--purple));
+    box-shadow: 0 6px 24px rgba(255,107,157,0.35);
+  }
+  #btnMain.running {
+    background: var(--card); color: var(--text);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08); font-size: 24px;
+  }
+  #btnSmall {
+    width: 44px; height: 44px; border-radius: 50%;
+    font-size: 18px; background: var(--card); color: var(--text);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+
+  /* 活动类型选择 */
+  #typePicker {
+    display: flex; justify-content: center; gap: 10px; padding: 0 20px 6px; flex-shrink: 0; flex-wrap: wrap;
+  }
+  #typePicker button {
+    padding: 6px 14px; border-radius: 20px; border: none;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    background: var(--card); color: var(--text2);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    touch-action: manipulation;
+  }
+  #typePicker button.on {
+    background: var(--pink); color: #fff;
+  }
+
+  /* 历史 */
+  #historyPanel {
+    position: fixed; inset: 0; z-index: 50; background: var(--bg);
+    display: none; flex-direction: column;
+    padding: max(16px, env(safe-area-inset-top)) 20px max(16px, env(safe-area-inset-bottom)) 20px;
+  }
+  #historyPanel.open { display: flex; }
+  #historyPanel h2 { color: var(--text); font-size: 18px; margin-bottom: 12px; text-align: center; }
+  #historyPanel .close-btn {
+    position: absolute; top: max(10px, env(safe-area-inset-top)); right: 16px;
+    width: 34px; height: 34px; border-radius: 50%; border: none;
+    background: var(--card); color: var(--text); font-size: 16px; cursor: pointer;
+  }
+  #historyList { flex: 1; overflow-y: auto; }
+  #historyList .entry {
+    background: var(--card); border-radius: 16px; padding: 14px 16px; margin-bottom: 8px;
+    color: var(--text); display: flex; justify-content: space-between; align-items: center;
+  }
+  #historyList .entry .emoji { font-size: 28px; margin-right: 10px; }
+  #historyList .entry .info { flex: 1; }
+  #historyList .entry .date { font-size: 11px; color: var(--text2); }
+  #historyList .entry .dist { font-size: 20px; font-weight: 700; }
+  #historyList .entry .meta { font-size: 11px; color: var(--text2); }
+  .empty-state { color: var(--text2); text-align: center; margin-top: 60px; font-size: 14px; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%); z-index: 30;
+    background: var(--card); color: var(--text); padding: 8px 20px;
+    border-radius: 20px; font-size: 13px; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1); pointer-events: none;
+    opacity: 0; transition: opacity 0.3s;
+  }
+  #toast.show { opacity: 1; }
+
+  /* 权限 */
+  #perm {
+    position: fixed; inset: 0; z-index: 60; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    color: var(--text); text-align: center; padding: 32px;
+  }
+  #perm .icon { font-size: 56px; }
+  #perm h2 { font-size: 20px; }
+  #perm p { color: var(--text2); font-size: 13px; max-width: 260px; }
+  #perm button {
+    background: linear-gradient(135deg, var(--pink), var(--purple));
+    border: none; color: #fff; padding: 14px 36px; border-radius: 28px;
+    font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="header">
+    <div class="emoji" id="headerEmoji">🗺️</div>
+    <div class="title">轨迹记录</div>
+    <div class="subtitle" id="headerSub">记录每一次出行</div>
+  </div>
+
+  <div id="typePicker">
+    <button onclick="setType('walk','🚶','散步')" class="on">🚶 散步</button>
+    <button onclick="setType('run','🏃','跑步')">🏃 跑步</button>
+    <button onclick="setType('bike','🚴','骑行')">🚴 骑行</button>
+    <button onclick="setType('drive','🚗','驾车')">🚗 驾车</button>
+  </div>
+
+  <div id="statusCard" class="idle">
+    <div class="big-text">📍</div>
+    <div class="hint">按下按钮开始记录轨迹</div>
+  </div>
+
+  <div id="mapWrap">
+    <div id="map"></div>
+    <div id="mapHint">路线会出现在这里</div>
+  </div>
+
+  <div id="controls">
+    <button id="btnSmall" onclick="toggleHistory()">📋</button>
+    <button id="btnMain" onclick="toggle()">📍</button>
+    <button id="btnSmall" onclick="toggleMap()">🗺️</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div id="historyPanel">
+  <button class="close-btn" onclick="toggleHistory()">✕</button>
+  <h2>历史记录</h2>
+  <div id="historyList"><div class="empty-state">还没有记录<br>出去逛逛吧 ✨</div></div>
+</div>
+
+<div id="perm">
+  <div class="icon">🐾</div>
+  <h2>轨迹记录</h2>
+  <p>需要位置权限来记录你的移动路线</p>
+  <button onclick="askPerm()">允许访问位置</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ===== 地图 =====
+const map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 19 }).setView([39.9, 116.4], 16);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+const routeLine = L.polyline([], { color: '#ff6b9d', weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+let startDot = null, liveDot = null;
+let mapBig = true;
+
+// ===== 状态 =====
+const S = {
+  activity: 'walk', emoji: '🚶', label: '散步',
+  running: false, paused: false,
+  points: [], startTime: 0, elapsedBefore: 0,
+  totalDist: 0,
+  watchId: null, wakeLock: null,
+};
+
+const $ = id => document.getElementById(id);
+const statusCard = $('statusCard');
+
+// ===== 工具 =====
+function fmtTime(s) {
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
+  return h>0 ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+function showToast(msg) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 1800);
+}
+function bounceEmoji() {
+  const el = $('headerEmoji'); el.classList.remove('bounce'); void el.offsetWidth; el.classList.add('bounce');
+}
+
+// ===== 活动类型 =====
+window.setType = function(type, emoji, label) {
+  S.activity = type; S.emoji = emoji; S.label = label;
+  $('headerEmoji').textContent = emoji;
+  $('headerSub').textContent = label + '中...';
+  document.querySelectorAll('#typePicker button').forEach(b => b.classList.remove('on'));
+  event.target.classList.add('on');
+  if (!S.running) $('headerSub').textContent = '记录每一次出行';
+};
+
+// ===== 位置 =====
+function onPosition(pos) {
+  if (!S.running || S.paused) return;
+  if (pos.coords.accuracy > 30) return;
+  const pt = { lat: pos.coords.latitude, lng: pos.coords.longitude, time: Date.now() };
+  if (S.points.length > 0) {
+    const last = S.points[S.points.length-1];
+    const R=6371, dLat=(pt.lat-last.lat)*Math.PI/180, dLon=(pt.lng-last.lng)*Math.PI/180;
+    const a=Math.sin(dLat/2)**2 + Math.cos(last.lat*Math.PI/180)*Math.cos(pt.lat*Math.PI/180)*Math.sin(dLon/2)**2;
+    const seg = R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    if (seg < 0.0003) return;
+    S.totalDist += seg;
+  }
+  S.points.push(pt);
+  routeLine.setLatLngs(S.points.map(p=>[p.lat,p.lng]));
+  map.setView([pt.lat, pt.lng], map.getZoom(), {animate:true,duration:0.3});
+  if (!startDot && S.points.length>0) {
+    const f=S.points[0];
+    startDot = L.circleMarker([f.lat,f.lng],{radius:7,color:'#fff',weight:2,fillColor:'#45d9a6',fillOpacity:1}).addTo(map);
+  }
+  if (!liveDot) {
+    liveDot = L.circleMarker([pt.lat,pt.lng],{radius:6,color:'#fff',weight:3,fillColor:'#ff6b9d',fillOpacity:1}).addTo(map);
+  } else { liveDot.setLatLng([pt.lat,pt.lng]); }
+  updateStats();
+}
+
+function updateStats() {
+  const now = Date.now();
+  const elapsed = S.elapsedBefore + (S.running && !S.paused ? (now - S.startTime)/1000 : 0);
+  const d = S.totalDist;
+  if (!S.running && !d) return;
+  statusCard.className = 'active';
+  const pace = d>0.01 ? (elapsed/60)/d : 0;
+  const paceStr = d>0.01 ? `${Math.floor(pace)}'${String(Math.round((pace-Math.floor(pace))*60)).padStart(2,'0')}"` : '--';
+  statusCard.innerHTML = `
+    <div class="stat-row">
+      <div><div class="stat-num">${d.toFixed(2)}</div><div class="stat-label">公里</div></div>
+      <div><div class="stat-num">${fmtTime(elapsed)}</div><div class="stat-label">用时</div></div>
+      <div><div class="stat-num">${Math.round(d*62)}</div><div class="stat-label">千卡</div></div>
+    </div>
+    <div class="pace-row">
+      <div class="pace-item"><div class="pace-val">${paceStr}</div><div class="pace-lbl">配速 /km</div></div>
+      <div class="pace-item"><div class="pace-val">${S.points.length}</div><div class="pace-lbl">轨迹点</div></div>
+    </div>`;
+}
+
+// ===== 控制 =====
+let updateInt = null;
+
+function start() {
+  if (S.running && !S.paused) return;
+  if (!S.running) {
+    S.running=true; S.paused=false; S.points=[]; S.totalDist=0; S.elapsedBefore=0; S.startTime=Date.now();
+    if (startDot){map.removeLayer(startDot);startDot=null;}
+    if (liveDot){map.removeLayer(liveDot);liveDot=null;}
+    routeLine.setLatLngs([]); $('mapHint').style.display='none';
+    updateStats(); showToast(`${S.emoji} 开始记录！`);
+  } else if (S.paused) {
+    S.paused=false; S.startTime=Date.now(); showToast('继续记录');
+  }
+  S.watchId = navigator.geolocation.watchPosition(onPosition, ()=>{}, {enableHighAccuracy:true,timeout:12000,maximumAge:1500});
+  try { navigator.wakeLock?.request('screen'); } catch(e){}
+  $('btnMain').textContent='⏸'; $('btnMain').classList.add('running');
+  bounceEmoji();
+  if (!updateInt) updateInt = setInterval(()=>{if(S.running&&!S.paused)updateStats();},1000);
+}
+
+function pause() {
+  if (!S.running || S.paused) return;
+  S.paused=true; S.elapsedBefore+=(Date.now()-S.startTime)/1000;
+  if(S.watchId){navigator.geolocation.clearWatch(S.watchId);S.watchId=null;}
+  $('btnMain').textContent='▶'; $('btnMain').classList.remove('running');
+  showToast('⏸ 已暂停');
+}
+
+function stop() {
+  if(!S.running) return;
+  if(!S.paused) S.elapsedBefore+=(Date.now()-S.startTime)/1000;
+  if(S.watchId){navigator.geolocation.clearWatch(S.watchId);S.watchId=null;}
+  clearInterval(updateInt); updateInt=null;
+  const d=S.totalDist, t=S.elapsedBefore;
+  const record = {date:new Date().toISOString(),distance:d,time:t,activity:S.activity,emoji:S.emoji,points:S.points};
+  const hist = JSON.parse(localStorage.getItem('trailHistory')||'[]');
+  hist.unshift(record); if(hist.length>50) hist.length=50;
+  localStorage.setItem('trailHistory',JSON.stringify(hist));
+  S.running=false; S.paused=false;
+  $('btnMain').textContent='📍'; $('btnMain').classList.remove('running');
+  statusCard.className='idle';
+  statusCard.innerHTML=`<div class="big-text">${S.emoji}</div><div class="hint">${d.toFixed(2)} km · ${fmtTime(t)} · 干得漂亮 ✨</div>`;
+  $('headerSub').textContent='记录每一次出行';
+  if(S.points.length>1) map.fitBounds(L.latLngBounds(S.points.map(p=>[p.lat,p.lng])),{padding:[40,40]});
+  renderHistory();
+}
+
+window.toggle = function() {
+  if(!S.running) start();
+  else if(S.paused) start();
+  else pause();
+};
+
+// ===== 地图缩放 =====
+window.toggleMap = function() {
+  const wrap = $('mapWrap');
+  mapBig = !mapBig;
+  if(mapBig) { wrap.classList.remove('mini'); $('mapHint').style.display=''; }
+  else { wrap.classList.add('mini'); $('mapHint').style.display='none'; }
+  setTimeout(()=>map.invalidateSize(),300);
+};
+
+// ===== 历史 =====
+function renderHistory() {
+  const hist = JSON.parse(localStorage.getItem('trailHistory')||'[]');
+  const el = $('historyList');
+  if(!hist.length){el.innerHTML='<div class="empty-state">还没有记录<br>出去逛逛吧 ✨</div>';return;}
+  el.innerHTML = hist.map((h,i)=>{
+    const d = new Date(h.date);
+    const ds = `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+    return `<div class="entry" onclick="viewRun(${i})">
+      <div class="emoji">${h.emoji||'📍'}</div>
+      <div class="info"><div class="dist">${h.distance.toFixed(2)} km</div><div class="date">${ds}</div></div>
+      <div class="meta">${fmtTime(h.time)}</div></div>`;
+  }).join('');
+}
+window.viewRun = function(i) {
+  const hist = JSON.parse(localStorage.getItem('trailHistory')||'[]');
+  const h=hist[i]; if(!h?.points) return;
+  $('historyPanel').classList.remove('open');
+  routeLine.setLatLngs(h.points.map(p=>[p.lat,p.lng]));
+  if(startDot){map.removeLayer(startDot);startDot=null;}
+  if(liveDot){map.removeLayer(liveDot);liveDot=null;}
+  if(h.points.length>1) {
+    const f=h.points[0], l=h.points[h.points.length-1];
+    startDot=L.circleMarker([f.lat,f.lng],{radius:7,color:'#fff',weight:2,fillColor:'#45d9a6',fillOpacity:1}).addTo(map);
+    L.circleMarker([l.lat,l.lng],{radius:7,color:'#fff',weight:2,fillColor:'#ff6b9d',fillOpacity:1}).addTo(map);
+    map.fitBounds(L.latLngBounds(h.points.map(p=>[p.lat,p.lng])),{padding:[40,40]});
+  }
+  statusCard.className='idle';
+  statusCard.innerHTML=`<div class="big-text">${h.emoji||'📍'}</div><div class="hint">${h.distance.toFixed(2)} km · ${fmtTime(h.time)}</div>`;
+};
+window.toggleHistory = function() {
+  const p = $('historyPanel');
+  if(p.classList.contains('open')) p.classList.remove('open');
+  else { renderHistory(); p.classList.add('open'); }
+};
+
+// ===== 权限 =====
+window.askPerm = function() {
+  navigator.geolocation.getCurrentPosition(
+    p => { $('perm').style.display='none'; map.setView([p.coords.latitude,p.coords.longitude],17); showToast('准备好啦，点 📍 开始 ✨'); },
+    e => alert('请在 设置>隐私>定位服务 中允许')
+  );
+};
+navigator.permissions?.query({name:'geolocation'}).then(r=>{
+  if(r.state==='granted'){ $('perm').style.display='none'; navigator.geolocation.getCurrentPosition(p=>map.setView([p.coords.latitude,p.coords.longitude],17),()=>{}, {enableHighAccuracy:true}); }
+}).catch(()=>{});
+
+window.addEventListener('resize',()=>map.invalidateSize());
+renderHistory();
+</script>
+</body>
+</html>
