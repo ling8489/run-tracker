@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="跑步追踪">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><rect width='120' height='120' rx='24' fill='%23ff5533'/><text x='60' y='72' font-size='48' text-anchor='middle' fill='white'>🏃</text></svg>">
+<title>跑步追踪</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --accent: #ff5533;
+    --accent2: #4dc9f6;
+    --bg: #000;
+    --surface: rgba(28,28,30,0.92);
+    --text: #fff;
+    --text2: rgba(255,255,255,0.55);
+    --radius: 16px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, 'SF Pro Display', 'PingFang SC', sans-serif; background: var(--bg); user-select: none; -webkit-user-select: none; }
+  #map { width: 100%; height: 100%; z-index: 1; }
+  .leaflet-control-zoom { display: none; }
+
+  /* 顶部面板 */
+  #panel {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    padding: max(12px, env(safe-area-inset-top)) 12px 20px 12px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.35) 80%, transparent 100%);
+  }
+  #panel .main-stats { display: flex; justify-content: space-around; text-align: center; margin-bottom: 6px; }
+  #panel .main-stats .val { font-size: 34px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; letter-spacing: -1px; line-height: 1; }
+  #panel .main-stats .lbl { font-size: 10px; color: var(--text2); letter-spacing: 1px; margin-top: 1px; }
+  #panel .sub-stats { display: flex; justify-content: center; gap: 18px; margin-top: 6px; flex-wrap: wrap; }
+  #panel .sub-stats .item { text-align: center; }
+  #panel .sub-stats .val { font-size: 17px; font-weight: 600; color: #ffa64d; }
+  #panel .sub-stats .lbl { font-size: 9px; color: rgba(255,166,77,0.55); }
+
+  /* 每公里分段 */
+  #splits {
+    position: fixed; top: 50%; right: 8px; transform: translateY(-50%); z-index: 10;
+    display: flex; flex-direction: column; gap: 3px; max-height: 60vh; overflow-y: auto;
+  }
+  #splits .split {
+    font-size: 10px; color: #fff; background: rgba(0,0,0,0.6); padding: 3px 8px;
+    border-radius: 10px; text-align: right; white-space: nowrap;
+    backdrop-filter: blur(6px); font-variant-numeric: tabular-nums;
+  }
+
+  /* 底部栏 */
+  #bottom {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+    padding: 12px 12px max(18px, env(safe-area-inset-bottom)) 12px;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  #btnStart {
+    width: 76px; height: 76px; border: none; border-radius: 50%;
+    font-size: 28px; color: #fff; cursor: pointer;
+    background: var(--accent);
+    box-shadow: 0 4px 24px rgba(255,85,51,0.45);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; touch-action: manipulation;
+  }
+  #btnStart.running { background: #3a3a3c; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+  .side-btn {
+    width: 44px; height: 44px; border: none; border-radius: 50%;
+    font-size: 18px; color: #fff; cursor: pointer;
+    background: rgba(255,255,255,0.1); backdrop-filter: blur(10px);
+    display: flex; align-items: center; justify-content: center;
+    touch-action: manipulation;
+  }
+
+  /* 历史面板 */
+  #historyPanel {
+    position: fixed; inset: 0; z-index: 50; background: var(--bg);
+    display: none; flex-direction: column;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)) 16px;
+  }
+  #historyPanel.open { display: flex; }
+  #historyPanel h2 { color: #fff; font-size: 20px; margin-bottom: 12px; text-align: center; }
+  #historyPanel .close-btn {
+    position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px;
+    width: 36px; height: 36px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,0.1); color: #fff; font-size: 18px; cursor: pointer;
+  }
+  #historyList { flex: 1; overflow-y: auto; }
+  #historyList .entry {
+    background: #1c1c1e; border-radius: 12px; padding: 14px; margin-bottom: 8px; color: #fff;
+    display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+  }
+  #historyList .entry .h-date { font-size: 12px; color: rgba(255,255,255,0.5); }
+  #historyList .entry .h-dist { font-size: 22px; font-weight: 700; }
+  #historyList .entry .h-meta { font-size: 12px; color: rgba(255,255,255,0.5); }
+  .empty { color: rgba(255,255,255,0.4); text-align: center; margin-top: 60px; font-size: 14px; }
+
+  /* 状态提示 */
+  #toast {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30;
+    color: #fff; font-size: 14px; background: rgba(0,0,0,0.75); padding: 8px 18px;
+    border-radius: 20px; pointer-events: none; opacity: 0; transition: opacity 0.25s;
+    backdrop-filter: blur(8px);
+  }
+  #toast.show { opacity: 1; }
+
+  /* 权限 */
+  #perm {
+    position: fixed; inset: 0; z-index: 60; background: #000;
+    display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    color: #fff; text-align: center; padding: 32px;
+  }
+  #perm button {
+    background: var(--accent); border: none; color: #fff; padding: 14px 36px;
+    border-radius: 28px; font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+
+  /* 目标设置 */
+  #goalBar {
+    position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 20; pointer-events: none;
+    background: rgba(255,255,255,0.1);
+  }
+  #goalFill { height: 100%; background: var(--accent2); width: 0%; transition: width 0.5s; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="goalBar"><div id="goalFill"></div></div>
+
+<div id="panel">
+  <div class="main-stats">
+    <div><div class="val" id="dist">0.00</div><div class="lbl">公里</div></div>
+    <div><div class="val" id="time">00:00</div><div class="lbl">用时</div></div>
+    <div><div class="val" id="kcal">0</div><div class="lbl">千卡</div></div>
+  </div>
+  <div class="sub-stats">
+    <div class="item"><div class="val" id="pace">--:--</div><div class="lbl">配速 /km</div></div>
+    <div class="item"><div class="val" id="curSpeed">0.0</div><div class="lbl">时速 km/h</div></div>
+    <div class="item"><div class="val" id="altitude">0</div><div class="lbl">海拔 m</div></div>
+    <div class="item"><div class="val" id="climb">0</div><div class="lbl">爬升 m</div></div>
+  </div>
+</div>
+
+<div id="splits"></div>
+
+<div id="bottom">
+  <button class="side-btn" id="btnHistory" title="历史记录">📋</button>
+  <button id="btnStart">▶</button>
+  <button class="side-btn" id="btnTheme" title="切换地图">🗺</button>
+</div>
+
+<div id="historyPanel">
+  <button class="close-btn" id="btnCloseHistory">✕</button>
+  <h2>跑步记录</h2>
+  <div id="historyList"><div class="empty">还没有跑步记录，出去跑一圈吧 🏃</div></div>
+</div>
+
+<div id="toast"></div>
+
+<div id="perm">
+  <div style="font-size:56px">🏃</div>
+  <div style="font-size:22px;font-weight:700;">跑步追踪</div>
+  <div style="opacity:0.55;max-width:260px;">需要访问位置信息来记录跑步路线。运动时请保持屏幕常亮，锁屏后 GPS 可能中断。</div>
+  <button onclick="requestPerm()">授权并开始</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ===== 地图 =====
+const map = L.map('map', { zoomControl: false, attributionControl: false, maxZoom: 19 }).setView([39.9, 116.4], 16);
+
+// 主题图层
+const layers = {
+  light: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }),
+  dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }),
+};
+layers.light.addTo(map);
+let currentTheme = 'light';
+
+// 路线
+const routeLine = L.polyline([], { color: '#ff5533', weight: 5, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+let startMarker = null, currentPosMarker = null;
+const splitMarkers = [];
+
+// ===== 状态 =====
+const S = {
+  running: false, paused: false,
+  points: [], startTime: 0, elapsedBefore: 0, pauseStart: 0,
+  totalDist: 0, climbTotal: 0,
+  watchId: null, wakeLock: null,
+  goalDist: 0, // 0 = 无目标
+  splits: [], // [{km, time}]
+  lastSplitDist: 0,
+  autoPauseCount: 0,
+  speechSynth: !!window.speechSynthesis,
+};
+
+const $ = id => document.getElementById(id);
+
+// ===== 工具 =====
+const R = 6371;
+function toRad(d) { return d * Math.PI / 180; }
+function haversine(p1, p2) {
+  const dLat = toRad(p2.lat - p1.lat), dLon = toRad(p2.lng - p1.lng);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(p1.lat))*Math.cos(toRad(p2.lat))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function fmtTime(s) {
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = Math.floor(s%60);
+  return h>0 ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+function showToast(msg, dur=1800) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), dur);
+}
+
+// ===== 语音播报 =====
+function speak(text) {
+  if (!S.speechSynth) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'zh-CN'; u.rate = 1.0; u.pitch = 1.1;
+  speechSynthesis.speak(u);
+}
+
+// ===== 位置更新 =====
+let lastGoodPos = null;
+
+function onPosition(pos) {
+  if (!S.running || S.paused) return;
+  const { latitude, longitude, speed, altitude } = pos.coords;
+
+  if (pos.coords.accuracy > 25) return; // 精度过滤
+
+  const pt = { lat: latitude, lng: longitude, alt: altitude || 0, time: Date.now(), speed: speed || 0 };
+
+  // 计算距离
+  if (S.points.length > 0) {
+    const last = S.points[S.points.length - 1];
+    const seg = haversine(last, pt);
+    if (seg < 0.0005) return; // 静止不动
+    S.totalDist += seg;
+
+    // 爬升
+    if (pt.alt && last.alt && pt.alt > last.alt) {
+      S.climbTotal += (pt.alt - last.alt);
+    }
+  }
+
+  S.points.push(pt);
+  lastGoodPos = pt;
+
+  routeLine.setLatLngs(S.points.map(p => [p.lat, p.lng]));
+  map.setView([latitude, longitude], map.getZoom(), { animate: true, duration: 0.3 });
+
+  // 标记
+  if (!startMarker && S.points.length > 0) {
+    const f = S.points[0];
+    startMarker = L.circleMarker([f.lat, f.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#ff5533', fillOpacity: 1 }).addTo(map);
+  }
+  if (!currentPosMarker) {
+    currentPosMarker = L.circleMarker([latitude, longitude], { radius: 7, color: '#fff', weight: 3, fillColor: '#4dc9f6', fillOpacity: 1 }).addTo(map);
+  } else {
+    currentPosMarker.setLatLng([latitude, longitude]);
+  }
+
+  // 每公里分段
+  const lastSplitKm = S.splits.length > 0 ? S.splits[S.splits.length - 1].km : 0;
+  if (S.totalDist >= lastSplitKm + 1) {
+    const elapsed = S.elapsedBefore + (S.running && !S.paused ? (Date.now() - S.startTime) / 1000 : 0);
+    S.splits.push({ km: Math.floor(S.totalDist), time: elapsed, pace: elapsed / S.totalDist });
+    $('splits').innerHTML = S.splits.map(s =>
+      `<div class="split">${s.km}km ${fmtTime(s.time)} ${Math.floor(s.pace)}:${String(Math.round((s.pace-Math.floor(s.pace))*60)).padStart(2,'0')}/km</div>`
+    ).join('');
+
+    // 语音播报
+    speak(`${Math.floor(S.totalDist)}公里，用时${fmtTime(elapsed)}，配速${Math.floor(s.pace)}分${String(Math.round((s.pace-Math.floor(s.pace))*60)).padStart(2,'0')}秒`);
+
+    // 公里标记
+    splitMarkers.push(L.circleMarker([latitude, longitude], { radius: 5, color: '#ffa64d', weight: 2, fillColor: '#ffa64d', fillOpacity: 0.8 }).addTo(map));
+  }
+
+  // 自动暂停检测
+  if (pt.speed < 0.5 && S.speechSynth) {
+    S.autoPauseCount++;
+  } else {
+    S.autoPauseCount = 0;
+  }
+
+  updateStats();
+  updateGoalBar();
+}
+
+function updateStats() {
+  const now = Date.now();
+  const elapsed = S.elapsedBefore + (S.running && !S.paused ? (now - S.startTime) / 1000 : 0);
+  const d = S.totalDist;
+
+  $('dist').textContent = d.toFixed(2);
+  $('time').textContent = fmtTime(elapsed);
+  $('kcal').textContent = Math.round(d * 62);
+
+  if (d > 0.02) {
+    const pace = (elapsed / 60) / d;
+    $('pace').textContent = `${Math.floor(pace)}:${String(Math.round((pace-Math.floor(pace))*60)).padStart(2,'0')}`;
+  }
+  if (S.running && !S.paused) {
+    const spd = lastGoodPos?.speed ? lastGoodPos.speed * 3.6 : d / (elapsed / 3600);
+    $('curSpeed').textContent = spd.toFixed(1);
+  }
+  $('altitude').textContent = Math.round(lastGoodPos?.alt || 0);
+  $('climb').textContent = Math.round(S.climbTotal);
+}
+
+function updateGoalBar() {
+  if (S.goalDist > 0) {
+    $('goalFill').style.width = Math.min(100, (S.totalDist / S.goalDist) * 100) + '%';
+    if (S.totalDist >= S.goalDist) {
+      speak('目标达成！');
+      showToast('🎉 目标达成！');
+    }
+  }
+}
+
+function onPosError(err) {
+  console.error('GPS:', err);
+  showToast('GPS 信号弱，请到开阔地带', 3000);
+}
+
+// ===== 屏幕常亮 =====
+async function keepAwake() { try { if ('wakeLock' in navigator) S.wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {} }
+async function releaseWake() { if (S.wakeLock) { try { await S.wakeLock.release(); } catch(e) {} S.wakeLock = null; } }
+
+// ===== 控制 =====
+let updateTimerId = null;
+
+function startRun() {
+  if (S.running && !S.paused) return;
+
+  if (!S.running) {
+    // 新跑步
+    S.running = true; S.paused = false;
+    S.points = []; S.totalDist = 0; S.climbTotal = 0; S.elapsedBefore = 0;
+    S.startTime = Date.now(); S.splits = []; S.autoPauseCount = 0;
+    if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+    if (currentPosMarker) { map.removeLayer(currentPosMarker); currentPosMarker = null; }
+    splitMarkers.forEach(m => map.removeLayer(m)); splitMarkers.length = 0;
+    routeLine.setLatLngs([]); $('splits').innerHTML = '';
+    $('goalFill').style.width = '0%';
+    updateStats();
+    showToast('🏃 开始跑步！');
+  } else if (S.paused) {
+    S.paused = false; S.startTime = Date.now();
+    showToast('▶ 继续跑步');
+  }
+
+  S.watchId = navigator.geolocation.watchPosition(onPosition, onPosError, {
+    enableHighAccuracy: true, timeout: 12000, maximumAge: 1500,
+  });
+
+  keepAwake();
+  $('btnStart').textContent = '⏸'; $('btnStart').classList.add('running');
+  startTimer();
+}
+
+function pauseRun() {
+  if (!S.running || S.paused) return;
+  S.paused = true; S.elapsedBefore += (Date.now() - S.startTime) / 1000;
+  if (S.watchId) { navigator.geolocation.clearWatch(S.watchId); S.watchId = null; }
+  releaseWake();
+  $('btnStart').textContent = '▶'; $('btnStart').classList.remove('running');
+  stopTimer();
+  showToast('⏸ 已暂停');
+}
+
+function stopRun() {
+  if (!S.running) return;
+  const now = Date.now();
+  if (!S.paused) S.elapsedBefore += (now - S.startTime) / 1000;
+  if (S.watchId) { navigator.geolocation.clearWatch(S.watchId); S.watchId = null; }
+  releaseWake();
+  stopTimer();
+
+  const d = S.totalDist, t = S.elapsedBefore;
+  const pace = d > 0.02 ? (t / 60) / d : 0;
+  const paceStr = d > 0.02 ? `${Math.floor(pace)}:${String(Math.round((pace-Math.floor(pace))*60)).padStart(2,'0')}` : '--';
+
+  // 保存记录
+  const record = {
+    date: new Date().toISOString(),
+    distance: d, time: t, pace, climb: S.climbTotal,
+    points: S.points, splits: S.splits,
+  };
+  const history = JSON.parse(localStorage.getItem('runHistory') || '[]');
+  history.unshift(record);
+  // 保留最近 50 条
+  if (history.length > 50) history.length = 50;
+  localStorage.setItem('runHistory', JSON.stringify(history));
+
+  S.running = false; S.paused = false;
+  $('btnStart').textContent = '▶'; $('btnStart').classList.remove('running');
+  updateStats();
+
+  speak(`跑步结束。${d.toFixed(2)}公里，用时${fmtTime(t)}，平均配速${paceStr}`);
+  showToast(`🏁 ${d.toFixed(2)}km | ${fmtTime(t)} | 配速 ${paceStr}`);
+
+  if (S.points.length > 1) {
+    map.fitBounds(L.latLngBounds(S.points.map(p => [p.lat, p.lng])), { padding: [50, 50] });
+  }
+
+  renderHistory();
+}
+
+$('btnStart').addEventListener('click', () => {
+  if (!S.running || S.paused) startRun();
+  else pauseRun();
+});
+
+// ===== 计时器 =====
+function startTimer() {
+  stopTimer();
+  function tick() {
+    if (S.running && !S.paused) updateStats();
+    if (S.running) updateTimerId = setTimeout(tick, 1000);
+  }
+  tick();
+}
+function stopTimer() { clearTimeout(updateTimerId); }
+
+// ===== 历史记录 =====
+function renderHistory() {
+  const history = JSON.parse(localStorage.getItem('runHistory') || '[]');
+  const el = $('historyList');
+  if (history.length === 0) { el.innerHTML = '<div class="empty">还没有跑步记录，出去跑一圈吧 🏃</div>'; return; }
+  el.innerHTML = history.map((h, i) => {
+    const d = new Date(h.date);
+    const dateStr = `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+    return `<div class="entry" onclick="viewRun(${i})">
+      <div><div class="h-date">${dateStr}</div><div class="h-dist">${h.distance.toFixed(2)} km</div></div>
+      <div style="text-align:right"><div class="h-meta">${fmtTime(h.time)}</div><div class="h-meta">${h.distance>0.02 ? Math.floor(h.pace)+':'+String(Math.round((h.pace-Math.floor(h.pace))*60)).padStart(2,'0') : '--'} /km</div></div>
+    </div>`;
+  }).join('');
+}
+window.viewRun = function(i) {
+  const history = JSON.parse(localStorage.getItem('runHistory') || '[]');
+  const h = history[i];
+  if (!h || !h.points) return;
+  $('historyPanel').classList.remove('open');
+
+  // 在地图上显示路线
+  routeLine.setLatLngs(h.points.map(p => [p.lat, p.lng]));
+  if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+  if (currentPosMarker) { map.removeLayer(currentPosMarker); currentPosMarker = null; }
+  splitMarkers.forEach(m => map.removeLayer(m)); splitMarkers.length = 0;
+  $('splits').innerHTML = '';
+
+  if (h.points.length > 1) {
+    const first = h.points[0];
+    const last = h.points[h.points.length - 1];
+    startMarker = L.circleMarker([first.lat, first.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#4caf50', fillOpacity: 1 }).addTo(map);
+    L.circleMarker([last.lat, last.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#ff5533', fillOpacity: 1 }).addTo(map);
+    map.fitBounds(L.latLngBounds(h.points.map(p => [p.lat, p.lng])), { padding: [50, 50] });
+  }
+
+  showToast(`${h.distance.toFixed(2)}km ${fmtTime(h.time)}`);
+};
+$('btnHistory').addEventListener('click', () => { renderHistory(); $('historyPanel').classList.add('open'); });
+$('btnCloseHistory').addEventListener('click', () => { $('historyPanel').classList.remove('open'); });
+
+// ===== 主题 =====
+$('btnTheme').addEventListener('click', () => {
+  if (currentTheme === 'light') {
+    map.removeLayer(layers.light); layers.dark.addTo(map); currentTheme = 'dark';
+  } else {
+    map.removeLayer(layers.dark); layers.light.addTo(map); currentTheme = 'light';
+  }
+});
+
+// ===== 权限 =====
+window.requestPerm = function() {
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      $('perm').style.display = 'none';
+      map.setView([pos.coords.latitude, pos.coords.longitude], 17);
+      showToast('准备就绪，点击 ▶ 开始');
+    },
+    err => alert('无法获取位置：' + err.message + '\n\n请在 设置 > 隐私 > 定位服务 中允许'),
+    { enableHighAccuracy: true }
+  );
+};
+
+// 自动检测权限
+navigator.permissions?.query({ name: 'geolocation' }).then(r => {
+  if (r.state === 'granted') {
+    $('perm').style.display = 'none';
+    navigator.geolocation.getCurrentPosition(p => map.setView([p.coords.latitude, p.coords.longitude], 17), ()=>{}, { enableHighAccuracy: true });
+  }
+}).catch(()=>{});
+
+// 目标设置(点击距离数字)
+$('dist').addEventListener('click', () => {
+  const val = prompt('设定距离目标（公里），0=无目标：', S.goalDist || '5');
+  if (val !== null) {
+    S.goalDist = parseFloat(val) || 0;
+    $('goalFill').style.width = '0%';
+    showToast(S.goalDist > 0 ? `目标：${S.goalDist} 公里` : '已取消目标');
+  }
+});
+
+// 响应式
+window.addEventListener('resize', () => map.invalidateSize());
+renderHistory();
+</script>
+</body>
+</html>
